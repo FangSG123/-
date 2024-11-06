@@ -1,6 +1,8 @@
 package com.yuanshenqidong;
 
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -8,7 +10,12 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.CommandSourceStack;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -22,8 +29,10 @@ public class YuanshenqidongMod {
 
     private ScheduledExecutorService scheduler;
     private boolean isTimerRunning = false;
+    private volatile boolean featureEnabled = false; // 控制功能启用与否
 
     public YuanshenqidongMod() {
+        // 注册事件总线
         MinecraftForge.EVENT_BUS.register(this);
     }
 
@@ -36,30 +45,55 @@ public class YuanshenqidongMod {
     @OnlyIn(Dist.CLIENT)
     public void onPlayerDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof Player) {
-            // 启动五分钟的计时器
-            startDeathTimer();
-            openWebPages();
+            if (featureEnabled) {
+                startDeathTimer();
+            }
         }
     }
 
     /**
+     * 注册自定义指令
      *
+     */
+    @SubscribeEvent
+    public void onRegisterCommands(RegisterCommandsEvent event) {
+        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+
+        LiteralArgumentBuilder<CommandSourceStack> toggleCommand = Commands.literal("yuanshenqidong")
+                .requires(source -> source.hasPermission(2)) // 仅 OP 可以执行
+                .executes(context -> toggleFeature(context.getSource()));
+
+        dispatcher.register(toggleCommand);
+    }
+
+    /**
+     * 切换功能启用与否
+     *
+     * @param source 命令源
+     * @return 命令执行状态
+     */
+    private int toggleFeature(CommandSourceStack source) {
+        featureEnabled = !featureEnabled;
+        source.sendSuccess(() -> Component.literal("原神启动器" + (featureEnabled ? "已开启" : "已关闭") + "。"), true);
+        System.out.println("启动器" + (featureEnabled ? "启用" : "禁用") + "。");
+        return 1;
+    }
+
+    /**
      * 如果在五分钟内检测不到窗口，则打开指定的网页。
      */
     private void startDeathTimer() {
         if (isTimerRunning) {
-            System.out.println("计时器已在运行中，跳过启动。");
+            System.out.println("计时器已在运行中。");
             return;
         }
         isTimerRunning = true;
 
         scheduler = Executors.newScheduledThreadPool(1);
 
-        final int totalDurationSeconds = 300; // 五分钟 = 300秒
-        final int intervalSeconds = 30; // 每10秒检测一次
-        final int totalChecks = totalDurationSeconds / intervalSeconds; // 300 / 10 = 30
-
-        // Runnable task to check webpage
+        final int totalDurationSeconds = 120;
+        final int intervalSeconds = 30;
+        final int totalChecks = totalDurationSeconds / intervalSeconds;
         Runnable checkTask = new Runnable() {
             private int count = 0;
 
@@ -68,23 +102,24 @@ public class YuanshenqidongMod {
                 count++;
                 boolean isOpen = BrowserWindowChecker.isWebPageOpen("原神");
                 if (!isOpen) {
-                    System.out.println("原神未启动，启原中...");
+                    System.out.println("你怎敢关闭原神...");
                     openWebPages();
                 } else {
-                    System.out.println("HappyGaming");
+                    System.out.println("仍然启原中");
                 }
 
                 if (count >= totalChecks) {
                     // 时间到，关闭调度器
                     scheduler.shutdown();
                     isTimerRunning = false;
-                    System.out.println("欢乐的时光总是短暂的。");
+                    System.out.println("计时器已关闭。");
                 }
             }
         };
 
         // Schedule the task at fixed rate
         scheduler.scheduleAtFixedRate(checkTask, 0, intervalSeconds, TimeUnit.SECONDS);
+        System.out.println("计时器启动。");
     }
 
     /**
@@ -102,15 +137,14 @@ public class YuanshenqidongMod {
             }
 
             // 向玩家发送消息通知
-            notifyPlayer("原神?启动！");
+            notifyPlayer("有人开玩了");
         } catch (Exception e) {
             e.printStackTrace();
-            notifyPlayer("原神?启动失败QAQ");
+            notifyPlayer("fuxx，有人无法启动Genshin");
         }
     }
 
     /**
-     * 根据操作系统打开指定的网页或下载链接。
      *
      * @param url 要打开的URL或下载链接。
      */
@@ -133,16 +167,14 @@ public class YuanshenqidongMod {
                 return;
             }
 
-            System.out.println("启原成功: " + url);
+            System.out.println("启原成功!: " + url);
         } catch (Exception e) {
-            System.out.println("启原失败: " + e.getMessage());
+            System.out.println("启原失败QAQ " + e.getMessage());
             e.printStackTrace();
         }
     }
 
-    /**
-     * @param message 要发送的消息
-     */
+    //向玩家发送消息通知
     private void notifyPlayer(String message) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null && minecraft.screen == null) {
